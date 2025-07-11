@@ -3657,6 +3657,7 @@ extension PolarBleApiImpl: PolarBleApi  {
                 case .orderedSame:
                     canDelete = true
                 case .orderedAscending:
+                    canDelete = true
                     break
                 case .orderedDescending:
                     break
