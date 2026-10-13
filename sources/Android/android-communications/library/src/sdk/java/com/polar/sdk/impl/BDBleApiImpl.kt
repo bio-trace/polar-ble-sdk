@@ -1567,17 +1567,13 @@ class BDBleApiImpl private constructor(context: Context, features: Set<PolarBleS
                         val state = pair.second
                         val isFirstEmission = firstEmission
                         firstEmission = false
-                        // The session state flow replays its latest value. When the monitor is
-                        // relaunched for a new connection, that replay is typically the stale
-                        // SESSION_CLOSED of the previously disconnected device, which was already
-                        // handled by the previous monitor. Processing it again would re-emit
-                        // deviceDisconnected and, as no session is active yet, cancel this
-                        // monitor before the new device's SESSION_OPEN is observed.
-                        if (isFirstEmission &&
-                            state == DeviceSessionState.SESSION_CLOSED &&
-                            bleSession.address != session.address
-                        ) {
-                            BleLogger.d(TAG, "Ignoring replayed SESSION_CLOSED of previous session")
+                        // The session state flow replays its latest value. The monitor starts only
+                        // when none is running (first connection, after cleanup() or a failure), so
+                        // a replayed SESSION_CLOSED was handled by the previous monitor or belongs to
+                        // a session nobody observed. That includes the device being opened now:
+                        // processing it would re-emit a stale deviceDisconnected while it reconnects.
+                        if (isFirstEmission && state == DeviceSessionState.SESSION_CLOSED) {
+                            BleLogger.d(TAG, "Ignoring replayed SESSION_CLOSED of ${bleSession.address}")
                             return@collect
                         }
                         deviceSessionState = state
@@ -1626,17 +1622,9 @@ class BDBleApiImpl private constructor(context: Context, features: Set<PolarBleS
                                         ?.remove(PolarDeviceTelemetryType.memfault_mds)
                                 }
                                 tearDownDevice(bleSession)
-                                // Cancel the monitor when no sessions remain open or opening
-                                val hasActiveSessions = listener?.deviceSessions()?.any {
-                                    it?.sessionState == DeviceSessionState.SESSION_OPEN ||
-                                    it?.sessionState == DeviceSessionState.SESSION_OPENING ||
-                                    it?.sessionState == DeviceSessionState.SESSION_OPEN_PARK
-                                } ?: false
-                                if (!hasActiveSessions) {
-                                    BleLogger.d(TAG, "No active sessions remaining, cancelling devicesStateMonitorJob")
-                                    devicesStateMonitorJob?.cancel()
-                                    devicesStateMonitorJob = null
-                                }
+                                // The monitor runs until cleanup() or shutDown(), even with no
+                                // session left. Stopping it here raced connectToDevice(): a session
+                                // reopened meanwhile had no observer and never reported its state.
                             }
                             DeviceSessionState.SESSION_OPENING -> {
                                 withContext(Dispatchers.Main) {
